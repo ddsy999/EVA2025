@@ -1,10 +1,15 @@
 library(dplyr)
-library(zoo)
+library(zoo)  # 이동평균 계산
 library(ggplot2)
 library(reshape2)
 library(lubridate)
 library(tidyr)
 library(moments)  # 첨도 계산을 위한 패키지
+library(forecast)  # ACF 분석
+library(TSA)       # 주파수 분석(FFT)
+library(signal)  # 신호 필터링
+library(gridExtra)  # 여러 개의 ggplot을 한 화면에 표시
+library(grid)
 
 load("data//run1.RData")
 load("data//run2.RData")
@@ -12,37 +17,21 @@ load("data//run3.RData")
 load("data//run4.RData")
 
 
-# 1. 날짜 벡터 생성 (1850-01-01 ~ 2014-12-31, 총 60225일)
+# 날짜 벡터 생성 (1850-01-01 ~ 2014-12-31, 총 60225일)
 dates <- seq(from = as.Date("1850-01-01"), by = "day", length.out = 60225)
 yearSet = year(dates) %>% unique()
 years = year(dates)
+# 연도별 0~1 변환
+df_time <- data.frame(
+  Date = dates,
+  Year = year(dates),
+  DayOfYear = yday(dates),  # 연도의 몇 번째 날인지
+  TotalDays = ifelse(leap_year(dates), 366, 365)  # 윤년 고려하여 총 일수 설정
+)
 
-# 2. run1[1,1,]의 데이터를 y값으로 사용
-y_values <- run1[1,1,]
-
-# 3. 90일 이동 중앙값(Moving Median) 계산
-y_moving_median <- rollapply(y_values, width = 90, FUN = median, fill = NA, align = "center")
-
-# 4. 90일 이동 90퍼센타일(Moving 90th Percentile) 계산
-y_moving_90th <- rollapply(y_values, width = 90, FUN = function(x) quantile(x, 0.9), fill = NA, align = "center")
-
-# 5. 데이터 프레임 생성
-df <- data.frame(date = dates, median_value = y_moving_median, percentile_90 = y_moving_90th , value = y_values)
-
-# 6. 9월 1일마다 vline 추가 (매년 9월 1일을 찾기)
-september_1_dates <- seq(from = as.Date("1850-09-01"), to = as.Date("2014-09-01"), by = "year")
-
-# 7. 시각화
-ggplot(df[1:4000,], aes(x = date)) +
-  # geom_line(aes(y=value))+
-  geom_line(aes(y = median_value), color = "blue", size = 1, alpha = 0.8) +  # 90일 이동 중앙값
-  geom_line(aes(y = percentile_90), color = "green", size = 1, alpha = 0.8) +  # 90일 이동 90퍼센타일
-  # geom_vline(xintercept = as.numeric(september_1_dates), color = "red", linetype = "dashed") +  # 9월 1일마다 빨간 점선
-  labs(title = "90-Day Moving Median & 90th Percentile Time Series",
-       x = "Date", y = "Value",
-       color = "Legend") +
-  scale_color_manual(values = c("blue" = "Median", "green" = "90th Percentile")) +
-  theme_minimal()
+# 변환된 시간 계산 (연도를 소수점으로 변환)
+df_time <- df_time %>%
+  mutate(Time_Normalized = (Year-1850) + (DayOfYear / TotalDays))
 
 
 
@@ -656,4 +645,360 @@ print(correlation)
 
 
 
+hist(run1[1,1,])
+
+
+# (1,1) 위치의 강수량 데이터
+X_t <- run1[2,4,]  # (60225,)
+
+# 시계열 길이
+T <- length(X_t)
+
+# X_{t-1}과 X_t 데이터 생성
+X_t_minus1 <- X_t[1:(T-1)]  # 이전 시점 데이터
+X_t_current <- X_t[2:T]      # 현재 시점 데이터
+
+# 상관계수 계산
+correlation <- cor(X_t_minus1, X_t_current, method = "pearson")
+
+# 결과 출력
+cat("X_t와 X_{t-1}의 상관계수:", correlation, "\n")
+
+
+
+# 데이터 프레임 생성
+df <- data.frame(X_t_minus1 = X_t_minus1, X_t_current = X_t_current)
+
+# 밀도를 색으로 표현한 산점도 (2D binning)
+ggplot(df, aes(x = X_t_minus1, y = X_t_current)) +
+  geom_bin2d(bins = 50) +  # bins 개수를 조절하여 해상도 조정
+  scale_fill_gradient(low = "blue", high = "red") +  # 농도를 파랑~빨강으로 표현
+  labs(x = "X_{t-1}", y = "X_t", title = "X_{t-1} vs X_t (Density Plot)") +
+  theme_minimal()
+
+
+
+
+# (1,1) 위치의 강수량 데이터
+X_t <- run1[1,1,]  # (60225,)
+
+# 1. 시계열 그래프 (최근 1000일 데이터 확인)
+ts_data <- ts(X_t)  # 시계열 데이터 변환
+plot(ts_data[1:1000], type="l", col="blue", main="Time Series Plot (최근 1000일)",
+     xlab="Time", ylab="Precipitation")
+
+# 2. 자기상관함수(ACF) 분석
+acf(X_t, lag.max=365, main="Autocorrelation Function (ACF)")  # 최대 1년 주기 확인
+
+# 3. 주파수 분석 (FFT)
+spectrum <- abs(fft(X_t))  # FFT 변환 후 절대값 계산
+freq <- (0:(length(spectrum)-1)) / length(spectrum)  # 주파수 값 설정
+plot(freq[1:1000], spectrum[1:1000], type="l", col="red",
+     main="Frequency Spectrum (FFT)",
+     xlab="Frequency", ylab="Magnitude")
+
+
+
+
+# (1,1) 위치의 강수량 데이터
+X_t <- run1[1,1,]  
+
+# Fast Fourier Transform (FFT) 수행
+spectrum <- abs(fft(X_t))  # FFT 변환 후 절대값 계산
+N <- length(X_t)  # 데이터 길이
+
+# 주파수 계산
+freq <- (0:(N-1)) / N  # 정규화된 주파수
+periods <- 1 / freq  # 주기에 해당하는 값 (0 제외)
+
+# 데이터 프레임 생성 (주파수와 스펙트럼 값 저장)
+fft_data <- data.frame(Frequency = freq, Period = periods, Magnitude = spectrum)
+
+# 0 주기(무한대)를 제외하고 크기 순으로 정렬
+fft_data <- fft_data[-1, ]  # 첫 번째 값(DC component) 제거
+fft_data <- fft_data[order(-fft_data$Magnitude), ]  # 크기 순 정렬
+
+# 상위 10개 주기 출력
+library(dplyr)
+top_periods <- fft_data %>%
+  filter(Period < N/2) %>%  # 비현실적으로 큰 주기 제거
+  head(10)  # 상위 10개 주기 선택
+
+# 결과 출력
+print(top_periods)
+
+
+
+
+
+
+
+
+
+
+
+
+# (1,1) 위치의 강수량 데이터
+X_t <- run1[1,1,]  
+T <- length(X_t)
+
+# 1. 데이터 프레임 생성 (최근 5000일만 사용)
+df <- data.frame(Time = 1:5000, Precipitation = X_t[1:5000])
+
+# 1️⃣ **원래 시계열 플롯**
+ggplot(df, aes(x = Time, y = Precipitation)) +
+  geom_line(color = "blue") +
+  labs(title = "Original Time Series (First 5000 Days)",
+       x = "Time", y = "Precipitation") +
+  theme_minimal()
+
+# 2️⃣ **700일 이동평균 플롯**
+rolling_avg <- rollmean(X_t, k=365, fill=NA)  # 700일 이동평균 계산
+df$Rolling_Avg <- rolling_avg[1:5000]  # 데이터프레임에 추가
+
+ggplot(df[1:5000,], aes(x = Time)) +
+  # geom_line(aes(y = Precipitation), color = "blue", alpha = 0.4) +  # 원래 데이터
+  geom_line(aes(y = Rolling_Avg), color = "red", size = 1) +  # 이동평균
+  labs(title = "700-day Moving Average",
+       x = "Time", y = "Smoothed Precipitation") +
+  theme_minimal()
+
+# 3️⃣ **700일 주기 필터링 그래프 (FFT)**
+spectrum <- fft(X_t)  # FFT 변환
+freq <- (0:(T-1)) / T  # 주파수 계산
+target_freq <- which.min(abs(1/freq - 700))  # 700일 주기에 해당하는 주파수 찾기
+
+# 700일 주기만 남기고 필터링
+filtered_spectrum <- rep(0+0i, length(spectrum))
+filtered_spectrum[target_freq] <- spectrum[target_freq]  # 700일 주기만 남김
+filtered_signal <- Re(fft(filtered_spectrum, inverse=TRUE) / length(spectrum))  # 역변환
+
+# 필터링된 데이터프레임 생성
+df$Filtered_700 <- filtered_signal[1:5000]
+
+ggplot(df, aes(x = Time, y = Filtered_700)) +
+  geom_line(color = "purple", size = 1) +
+  labs(title = "Filtered 700-day Cycle",
+       x = "Time", y = "Precipitation (Filtered)") +
+  theme_minimal()
+
+
+
+
+
+# (1,1) 위치의 강수량 데이터
+X_t <- run1[3,1,]  # (60225,)
+
+# 시계열 길이
+T <- length(X_t)
+
+# X_{t-1}과 X_t 데이터 생성
+X_t_minus1 <- X_t[1:(T-1)]  # 이전 시점 데이터
+X_t_current <- X_t[2:T]      # 현재 시점 데이터
+
+# 데이터 프레임 생성
+df <- data.frame(X_t_minus1 = X_t_minus1, X_t_current = X_t_current)
+
+# 밀도를 색으로 표현한 산점도 (2D binning)
+ggplot(df, aes(x = X_t_minus1, y = X_t_current)) +
+  geom_bin2d(bins = 50) +  # bins 개수를 조절하여 해상도 조정
+  scale_fill_gradient(low = "blue", high = "red") +  # 농도를 파랑~빨강으로 표현
+  labs(x = "X_{t-1}", y = "X_t", title = "X_{t-1} vs X_t (Density Plot)") +
+  theme_minimal()
+
+
+
+
+# 빈 리스트 생성 (각 위치별 ggplot 저장)
+plot_list <- list()
+# 5x5 격자에서 각각의 위치에 대해 그래프 생성
+for (i in 1:5) {
+  for (j in 1:5) {
+    # (i,j) 위치의 강수량 데이터
+    X_t <- run4[i,j,]  
+    T <- length(X_t)
+    
+    # X_{t-1}과 X_t 데이터 생성
+    X_t_minus1 <- X_t[1:(T-1)]
+    X_t_current <- X_t[2:T]
+    
+    # 데이터 프레임 생성
+    df <- data.frame(X_t_minus1 = X_t_minus1, X_t_current = X_t_current)
+    
+    # 밀도를 색으로 표현한 산점도 (범례 및 타이틀 제거)
+    p <- ggplot(df, aes(x = X_t_minus1, y = X_t_current)) +
+      geom_bin2d(bins = 50) +  
+      scale_fill_gradient(low = "blue", high = "red", guide = "none") +  # 범례 제거
+      labs(x = NULL, y = NULL) +  # 축 라벨 제거
+      theme_minimal() +
+      theme(legend.position = "none",  # 범례 제거
+            plot.title = element_blank(),  # 타이틀 제거
+            axis.text = element_blank(),  # 축 눈금 제거
+            axis.ticks = element_blank())  # 축 눈금 제거
+    
+    # 리스트에 저장
+    plot_list[[length(plot_list) + 1]] <- p
+  }
+}
+
+x_label <- textGrob(expression(X[t-1]), gp = gpar(fontsize = 14, fontface = "bold"))
+y_label <- textGrob(expression(X[t]), rot = 90, gp = gpar(fontsize = 14, fontface = "bold"))
+title_label = textGrob("run4", gp = gpar(fontsize = 14, fontface = "bold"))
+
+# 5x5 격자로 플롯 정렬
+grid.arrange(
+  arrangeGrob(grobs = plot_list, ncol = 5, nrow = 5),
+  bottom = x_label,  # X축 제목
+  left = y_label,     # Y축 제목
+  top = title_label
+)
+
+
+X_t_minus1[which( X_t_current >3)]
+X_t_current[which( X_t_current >3)]
+
+X_t_minus1[which( X_t_minus1 >3)]
+X_t_current[which( X_t_minus1 >3)] %>% round(3)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 특정 지역의 시계열 데이터를 저장할 행렬 (5×5 지역)
+cor_matrix <- matrix(0, 25, 25)  # 25개 지역 간 상관행렬
+
+# 지역 간 시계열 상관관계 계산
+for (i in 1:5) {
+  for (j in 1:5) {
+    for (k in 1:5) {
+      for (l in 1:5) {
+        # 1D 인덱스로 변환
+        idx1 <- (i - 1) * 5 + j
+        idx2 <- (k - 1) * 5 + l
+        
+        # 피어슨 상관계수 계산
+        cor_matrix[idx1, idx2] <- cor(run1[i,j,], run1[k,l,], use="complete.obs")
+      }
+    }
+  }
+}
+
+# 결과 시각화 (Heatmap)
+library(ggplot2)
+library(reshape2)
+
+# 데이터 프레임 변환
+cor_df <- melt(cor_matrix)
+colnames(cor_df) <- c("Region1", "Region2", "Correlation")
+
+# 히트맵 그리기
+ggplot(cor_df, aes(x=Region1, y=Region2, fill=Correlation)) +
+  geom_tile() +
+  scale_fill_gradient2(low="blue", mid="white", high="red", midpoint=0) +
+  theme_minimal() +
+  labs(title="지역 간 시계열 상관행렬", x="지역1", y="지역2")
+
+
+
+
+
+
+
+
+
+
+
+
+# 특정 위치 (1,1)에서 시계열 데이터 추출
+data_series <- run1[1,1,]
+
+# X_{t-1}과 변화량 (X_t - X_{t-1}) 계산
+X_t1 <- data_series[1:(length(data_series)-1)]
+X_diff <- diff(data_series)  # X_t - X_{t-1}
+
+# 데이터프레임 생성
+df <- data.frame(X_t1, X_diff)
+
+# X_{t-1} 값을 구간(bin)으로 나눠 평균 변화량 계산
+library(dplyr)
+df_summary <- df %>%
+  mutate(X_bin = cut(X_t1, breaks=20)) %>%  # 20개 구간으로 나눔
+  group_by(X_bin) %>%
+  summarise(mean_diff = mean(X_diff, na.rm=TRUE))
+
+# 바 플롯 그리기
+library(ggplot2)
+ggplot(df_summary, aes(x=X_bin, y=mean_diff)) +
+  geom_bar(stat="identity", fill="steelblue") +
+  theme_minimal() +
+  labs(title="X_{t-1}에 따른 변화량 (X_t - X_{t-1})", 
+       x="X_{t-1} (구간)", y="X_t - X_{t-1} 평균 변화량") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(dplyr)
+
+# 특정 위치 (1,1)에서 시계열 데이터 추출
+data_series <- run1[1,1,]
+
+# X_{t-1}과 X_t 생성
+X_t1 <- data_series[1:(length(data_series)-1)]
+X_t <- data_series[2:length(data_series)]
+
+# 데이터프레임 생성
+df <- data.frame(X_t1, X_t)
+
+# X_{t-1}을 분위수(quantile) 기준으로 4개 그룹으로 나눔
+df <- df %>%
+  mutate(X_bin = ntile(X_t1, 4))  # 4분위(Quartile)로 구분
+
+# 각 구간별로 AR(1) 모델 적합
+ar_results <- df %>%
+  group_by(X_bin) %>%
+  summarise(beta1 = coef(lm(X_t ~ X_t1, data = cur_data()))[2],
+            p_value = summary(lm(X_t ~ X_t1, data = cur_data()))$coefficients[2,4])
+
+# 결과 출력
+print(ar_results)
+
+# 계수 시각화
+library(ggplot2)
+ggplot(ar_results, aes(x=factor(X_bin), y=beta1)) +
+  geom_bar(stat="identity", fill="steelblue") +
+  theme_minimal() +
+  labs(title="X_{t-1} 크기에 따른 AR(1) 계수 변화", x="X_{t-1} 구간", y="AR(1) 계수")
 
