@@ -81,7 +81,7 @@ summary(lm_result)
 
 ################# X_{t-1} 의 크기에 따른 평균 변화량 ##############
 # 특정 위치 (1,1)에서 시계열 데이터 추출
-data_series <- run1[1,1,]
+data_series <- run1[3,5,]
 
 # X_{t-1}과 변화량 (X_t - X_{t-1}) 계산
 X_t1 <- data_series[1:(length(data_series)-1)]
