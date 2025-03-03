@@ -10,6 +10,14 @@ library(TSA)       # 주파수 분석(FFT)
 library(signal)  # 신호 필터링
 library(gridExtra)  # 여러 개의 ggplot을 한 화면에 표시
 library(grid)
+library(plotly)
+library(gstat)
+library(sp)
+library(spacetime)
+library(sf)
+library(geosphere)
+library(evd)
+library(evir)   # gpd() 함수 제공
 
 load("data//run1.RData")
 load("data//run2.RData")
@@ -25,13 +33,12 @@ years = year(dates)
 df_time <- data.frame(
   Date = dates,
   Year = year(dates),
-  DayOfYear = yday(dates),  # 연도의 몇 번째 날인지
-  TotalDays = ifelse(leap_year(dates), 366, 365)  # 윤년 고려하여 총 일수 설정
+  DayOfYear = yday(dates)  # 연도의 몇 번째 날인지
 )
 
 # 변환된 시간 계산 (연도를 소수점으로 변환)
 df_time <- df_time %>%
-  mutate(Time_Normalized = (Year-1850) + (DayOfYear / TotalDays))
+  mutate(Time_Normalized = (Year-1850) + (DayOfYear / 60225))
 
 
 
@@ -1001,4 +1008,581 @@ ggplot(ar_results, aes(x=factor(X_bin), y=beta1)) +
   geom_bar(stat="identity", fill="steelblue") +
   theme_minimal() +
   labs(title="X_{t-1} 크기에 따른 AR(1) 계수 변화", x="X_{t-1} 구간", y="AR(1) 계수")
+
+
+
+
+
+
+
+# 5x5 셀의 평균 강수량 계산
+# 5x5 셀의 평균 강수량 계산
+mean_precipitation <- apply(run1, c(1, 2), mean)
+
+# X, Y 좌표 생성
+x_vals <- seq(1, 5, 1)
+y_vals <- seq(1, 5, 1)
+
+# plotly의 surface 플롯을 위한 올바른 데이터 형태로 변환
+fig <- plot_ly(
+  x = x_vals,
+  y = y_vals,
+  z = ~mean_precipitation,
+  type = "surface"
+)
+
+# 그래프 레이아웃 설정
+fig <- fig %>% layout(
+  title = "3D Mean Precipitation Distribution",
+  scene = list(
+    xaxis = list(title = "X-axis (Grid)"),
+    yaxis = list(title = "Y-axis (Grid)"),
+    zaxis = list(title = "Mean Precipitation")
+  )
+)
+
+# 그래프 출력
+fig
+
+
+#####################################################
+# 5x5 평균 강수량 계산 함수
+calculate_mean_precip <- function(run_data, label) {
+  mean_precip <- apply(run_data, c(1, 2), mean)
+  df <- melt(mean_precip)
+  colnames(df) <- c("X", "Y", "MeanPrecip")
+  df$Run <- label
+  return(df)
+}
+
+# 각 Run 데이터 변환
+df1 <- calculate_mean_precip(run1, "Run1")
+df2 <- calculate_mean_precip(run2, "Run2")
+df3 <- calculate_mean_precip(run3, "Run3")
+df4 <- calculate_mean_precip(run4, "Run4")
+
+# 전체 데이터에서 최소, 최대값 구하기
+all_data <- rbind(df1, df2, df3, df4)
+min_val <- min(all_data$MeanPrecip)
+max_val <- max(all_data$MeanPrecip)
+
+# 공통 스타일을 적용한 히트맵 생성 함수 (동일한 컬러 스케일 범위 설정)
+create_heatmap <- function(df, title) {
+  ggplot(df, aes(x = X, y = Y, fill = MeanPrecip)) +
+    geom_tile() +
+    scale_fill_gradient(low = "grey", high = "red", limits = c(min_val, max_val)) +  # 동일한 범위 설정
+    labs(title = title, x = "X-axis (Grid)", y = "Y-axis (Grid)", fill = "Mean Precip") +
+    theme_minimal()
+}
+
+# 4개 히트맵 생성 (컬러 스케일 동일)
+plot1 <- create_heatmap(df1, "Run1 - Mean Precipitation")
+plot2 <- create_heatmap(df2, "Run2 - Mean Precipitation")
+plot3 <- create_heatmap(df3, "Run3 - Mean Precipitation")
+plot4 <- create_heatmap(df4, "Run4 - Mean Precipitation")
+
+# 4개 그래프를 한 화면에 배치
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2)
+
+
+
+
+#########################
+
+# 하위 X% 설정
+lower_percentile <- 1 # 예: 하위 10% 선택
+
+# 하위 X% 평균 강수량 계산 함수
+calculate_lower_percentile_mean <- function(run_data, label, percentile) {
+  lower_mean_precip <- matrix(NA, nrow = 5, ncol = 5)
+  
+  for (i in 1:5) {
+    for (j in 1:5) {
+      # 특정 셀의 강수량 데이터 추출
+      values <- run_data[i, j, ]
+      
+      # 하위 X% 값 선택
+      threshold <- quantile(values, probs = percentile / 100, na.rm = TRUE)
+      lower_values <- values[values <= threshold]
+      
+      # 하위 X% 평균 계산
+      lower_mean_precip[i, j] <- mean(lower_values, na.rm = TRUE)
+    }
+  }
+  
+  # 데이터 프레임 변환
+  df <- melt(lower_mean_precip)
+  colnames(df) <- c("X", "Y", "MeanPrecip")
+  df$Run <- label
+  return(df)
+}
+
+# 각 Run 데이터 변환 (하위 X% 평균 강수량)
+df1 <- calculate_lower_percentile_mean(run1, "Run1", lower_percentile)
+df2 <- calculate_lower_percentile_mean(run2, "Run2", lower_percentile)
+df3 <- calculate_lower_percentile_mean(run3, "Run3", lower_percentile)
+df4 <- calculate_lower_percentile_mean(run4, "Run4", lower_percentile)
+
+# 전체 데이터에서 최소, 최대값 구하기 (컬러 스케일 통일)
+all_data <- rbind(df1, df2, df3, df4)
+min_val <- min(all_data$MeanPrecip, na.rm = TRUE)
+max_val <- max(all_data$MeanPrecip, na.rm = TRUE)
+
+# 공통 스타일을 적용한 히트맵 생성 함수 (동일한 컬러 스케일 범위 설정)
+create_heatmap <- function(df, title) {
+  ggplot(df, aes(x = X, y = Y, fill = MeanPrecip)) +
+    geom_tile() +
+    scale_fill_gradient(low = "grey", high = "red", limits = c(min_val, max_val)) +  # 동일한 범위 설정
+    labs(title = title, x = "X-axis (Grid)", y = "Y-axis (Grid)", fill = "Mean Precip") +
+    theme_minimal()
+}
+
+# 4개 히트맵 생성 (컬러 스케일 동일)
+plot1 <- create_heatmap(df1, paste0("Run1 - Lower ", lower_percentile, "% Mean Precip"))
+plot2 <- create_heatmap(df2, paste0("Run2 - Lower ", lower_percentile, "% Mean Precip"))
+plot3 <- create_heatmap(df3, paste0("Run3 - Lower ", lower_percentile, "% Mean Precip"))
+plot4 <- create_heatmap(df4, paste0("Run4 - Lower ", lower_percentile, "% Mean Precip"))
+
+# 4개 그래프를 한 화면에 배치
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2)
+
+
+
+
+
+# 분석할 특정 위치 선택 (예: (1,1))
+i <- 1
+j <- 1
+
+# run1[i, j, ]에서 1차원 벡터 추출
+rainfall_data <- run1[i, j, ]
+
+# 데이터 정보 설정
+days_per_year <- 365
+years <- length(rainfall_data) / days_per_year  # 전체 연수 (165년)
+
+# 날짜 벡터 생성
+day_of_year <- rep(1:days_per_year, years)
+year <- rep(1850:(1850 + years - 1), each=days_per_year)
+
+# 데이터 프레임 생성
+df <- data.frame(Day = factor(day_of_year), Year = year, Rainfall = rainfall_data)
+
+# 박스플롯 생성
+ggplot(df, aes(x=Day, y=Rainfall)) +
+  geom_boxplot(outlier.shape=NA) +  # 이상치 제거
+  labs(title="Daily Precipitation Distribution (1850-2014)", 
+       x="Day of the Year", y="Precipitation (mm)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle=90, hjust=1)) 
+
+####################################################################################
+
+
+
+
+
+# 데이터 정보 설정
+days_per_year <- 365
+years <- 165  # 1850년~2014년 (총 165년)
+grid_size <- 5  # 5x5 지역
+
+# 분위수 데이터를 저장할 리스트
+percentile_list <- list()
+
+# 5x5 지역에 대해 반복문 수행
+for (i in 1:grid_size) {
+  for (j in 1:grid_size) {
+    # 각 위치의 강수량 데이터 가져오기
+    rainfall_data <- run1[i, j, ]
+    
+    # 날짜 벡터 생성
+    day_of_year <- rep(1:days_per_year, years)
+    
+    # 데이터 프레임 생성
+    df <- data.frame(Cell = paste0("(", i, ",", j, ")"), 
+                     Day = day_of_year, 
+                     Rainfall = rainfall_data)
+    
+    # 분위수(10%, 25%, 50%, 75%, 90%) 계산
+    percentiles <- df %>%
+      group_by(Day) %>%
+      summarise(p10 = quantile(Rainfall, 0.10, na.rm=TRUE),
+                p25 = quantile(Rainfall, 0.25, na.rm=TRUE),
+                p50 = quantile(Rainfall, 0.50, na.rm=TRUE),
+                p75 = quantile(Rainfall, 0.75, na.rm=TRUE),
+                p90 = quantile(Rainfall, 0.90, na.rm=TRUE)) %>%
+      mutate(Cell = paste0("(", i, ",", j, ")"))  # 셀 위치 추가
+    
+    # 리스트에 저장
+    percentile_list[[paste0(i, "_", j)]] <- percentiles
+  }
+}
+
+# 모든 데이터를 하나의 데이터 프레임으로 결합
+percentile_df <- bind_rows(percentile_list)
+
+# X축 눈금 (월별 대표 일자)
+month_ticks <- c(1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335)
+month_labels <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# 5x5 지역에 대해 분위수 그래프 생성 (facet_wrap 사용)
+ggplot(percentile_df, aes(x=Day)) +
+  geom_line(aes(y=p10, color="10%"), linewidth=0.6) +
+  geom_line(aes(y=p25, color="25%"), linewidth=0.6) +
+  geom_line(aes(y=p50, color="50% (Median)"), linewidth=0.8) +
+  geom_line(aes(y=p75, color="75%"), linewidth=0.6) +
+  geom_line(aes(y=p90, color="90%"), linewidth=0.6) +
+  labs(title="Precipitation Percentiles by Day (1850-2014) for 5x5 Grid",
+       x="Day of the Year", y="Precipitation (mm)", color="Percentile") +
+  theme_minimal() +
+  scale_x_continuous(breaks=month_ticks, labels=month_labels) +
+  theme(axis.text.x = element_blank()) +
+  facet_wrap(~Cell, ncol=5)
+
+
+
+
+
+
+
+
+
+
+# 5x5 지역의 가능한 좌표 생성
+coords <- expand.grid(X = 1:5, Y = 1:5)
+
+# 날짜 벡터 생성 (1850-2014년)
+dates <- seq(from = as.Date("1850-01-01"), by = "day", length.out = 60225)
+
+# 15일 단위 블록 생성
+time_blocks <- rep(1:(length(dates) / 15), each=15, length.out=length(dates))
+
+# 시간 블록을 공간 데이터와 결합
+rainfall_data <- expand.grid(X = 1:5, Y = 1:5, Date = dates) %>%
+  mutate(Block = rep(time_blocks, times = 5 * 5))  # 각 위치(X, Y)에 대해 반복 적용
+
+# 강수량 데이터를 올바르게 할당
+rainfall_data$Rainfall <- apply(rainfall_data, 1, function(row) {
+  X_idx <- as.integer(row["X"])
+  Y_idx <- as.integer(row["Y"])
+  date_idx <- which(dates == as.Date(row["Date"]))  # 날짜 인덱스 찾기
+  if (length(date_idx) == 1 && X_idx >= 1 && X_idx <= 5 && Y_idx >= 1 && Y_idx <= 5) {
+    return(run1[X_idx, Y_idx, date_idx])
+  } else {
+    return(NA)  # 범위를 벗어나면 NA
+  }
+})
+
+# 가능한 모든 위치 쌍 계산
+location_pairs <- expand.grid(1:nrow(coords), 1:nrow(coords))
+colnames(location_pairs) <- c("point1", "point2")
+
+# 유클리드 거리 계산 (공간적 거리)
+location_pairs <- location_pairs %>%
+  rowwise() %>%
+  mutate(
+    X1 = coords$X[point1], Y1 = coords$Y[point1],
+    X2 = coords$X[point2], Y2 = coords$Y[point2],
+    distance = sqrt((X2 - X1)^2 + (Y2 - Y1)^2)
+  ) %>%
+  ungroup()
+
+# 강수량 데이터와 위치 데이터를 조인하여 거리별 분석
+variogram_data <- rainfall_data %>%
+  inner_join(rainfall_data, by = c("Block"), suffix = c("_1", "_2")) %>%
+  inner_join(location_pairs, by = c("X_1" = "X1", "Y_1" = "Y1", "X_2" = "X2", "Y_2" = "Y2"))
+
+# 반분산(Semivariance) 계산
+variogram_data <- variogram_data %>%
+  mutate(semivariance = (Rainfall_1 - Rainfall_2)^2 / 2) %>%
+  group_by(Block, distance) %>%
+  summarise(semivariance = mean(semivariance, na.rm=TRUE), .groups="drop")
+
+# 15일 단위 Variogram 평균 계산
+final_variogram <- variogram_data %>%
+  group_by(distance) %>%
+  summarise(semivariance = mean(semivariance, na.rm=TRUE), .groups="drop")
+
+# ggplot을 이용한 Variogram 시각화
+ggplot(final_variogram, aes(x=distance, y=semivariance)) +
+  geom_point(alpha=0.6) +
+  geom_smooth(method="loess", se=FALSE, color="red") +
+  labs(title="Averaged Empirical Spatial Variogram (15-day blocks)",
+       x="Spatial Lag Distance",
+       y="Semivariance") +
+  theme_minimal()
+
+
+
+
+
+
+
+
+
+
+
+###################################################
+
+library(evir)   # gpd() 함수 제공
+data = as.vector(run1) 
+
+
+# 여러 개의 threshold 값 설정 (상위 90% ~ 99% 분위수)
+thresholds <- quantile(data, seq(0.90, 0.99, by = 0.01))
+
+# threshold 별로 GPD 적합 후 모수 추정값 저장
+shape_values <- c()
+scale_values <- c()
+
+for (thresh in thresholds) {
+  fit <- gpd(data, thresh)  # GPD 적합
+  shape_values <- c(shape_values, fit$par.ests["xi"])  # Shape (ξ)
+  scale_values <- c(scale_values, fit$par.ests["beta"]) # Scale (σ)
+}
+
+# 결과를 데이터 프레임으로 정리
+results <- data.frame(Threshold = thresholds, Shape = shape_values, Scale = scale_values)
+
+# Shape 변화 시각화
+p1 <- ggplot(results, aes(x = Threshold, y = Shape)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(color = "blue") +
+  labs(title = "Threshold 변화에 따른 Shape (ξ) 추정값",
+       x = "Threshold",
+       y = "Shape (ξ)") +
+  theme_minimal()
+
+# Scale 변화 시각화
+p2 <- ggplot(results, aes(x = Threshold, y = Scale)) +
+  geom_line(color = "red", size = 1) +
+  geom_point(color = "red") +
+  labs(title = "Threshold 변화에 따른 Scale (σ) 추정값",
+       x = "Threshold",
+       y = "Scale (σ)") +
+  theme_minimal()
+
+# 두 그래프 나란히 배치
+grid.arrange(p1, p2, ncol = 2)
+
+
+#######################################
+
+# 데이터 준비
+data <- as.vector(run1)  # (5,5,60225) 데이터를 1차원 벡터로 변환
+total_days <- length(data)  # 전체 일수 (60225)
+years <- total_days / 365  # 연도 개수
+
+# 계절 정의 (봄: 3~5월, 여름: 6~8월, 가을: 9~11월, 겨울: 12~2월)
+season_names <- c("Spring", "Summer", "Autumn", "Winter")
+season_indices <- list(
+  Spring = rep(c(rep(TRUE, 59), rep(FALSE, 274)), years),
+  Summer = rep(c(rep(FALSE, 59), rep(TRUE, 92), rep(FALSE, 214)), years),
+  Autumn = rep(c(rep(FALSE, 151), rep(TRUE, 91), rep(FALSE, 123)), years),
+  Winter = rep(c(rep(FALSE, 242), rep(TRUE, 31), rep(FALSE, 59), rep(TRUE, 31)), years)
+)
+
+# 분석할 threshold 비율 (상위 90% ~ 99% 분위수)
+quantiles <- seq(0.90, 0.99, by = 0.01)
+
+# 결과 저장 리스트
+seasonal_results <- list()
+
+# 계절별 분석 수행
+for (season in season_names) {
+  seasonal_data <- data[season_indices[[season]]]  # 계절별 데이터 추출
+  
+  shape_values <- c()
+  scale_values <- c()
+  thresholds <- quantile(seasonal_data, quantiles)  # 계절별 threshold 계산
+  
+  # 각 threshold에 대해 GPD 적합
+  for (thresh in thresholds) {
+    fit <- gpd(seasonal_data, thresh)  # GPD 적합
+    shape_values <- c(shape_values, fit$par.ests["xi"])   # Shape (ξ)
+    scale_values <- c(scale_values, fit$par.ests["beta"]) # Scale (σ)
+  }
+  
+  # 결과 저장
+  seasonal_results[[season]] <- data.frame(
+    Threshold = thresholds,
+    Shape = shape_values,
+    Scale = scale_values,
+    Season = season
+  )
+}
+
+# 전체 데이터프레임 결합
+final_results <- do.call(rbind, seasonal_results)
+
+# 개별 그래프 생성
+p1 <- ggplot(final_results, aes(x = Threshold, y = Shape, color = Season)) +
+  geom_line(size = 1) +
+  geom_point() +
+  labs(title = "Threshold 변화에 따른 Shape (ξ) 추정값",
+       x = "Threshold",
+       y = "Shape (ξ)",
+       color = "Season") +
+  theme_minimal()
+
+p2 <- ggplot(final_results, aes(x = Threshold, y = Scale, color = Season)) +
+  geom_line(size = 1) +
+  geom_point() +
+  labs(title = "Threshold 변화에 따른 Scale (σ) 추정값",
+       x = "Threshold",
+       y = "Scale (σ)",
+       color = "Season") +
+  theme_minimal()
+
+# 그래프 나란히 출력
+grid.arrange(p1, p2, ncol = 2)
+
+
+
+
+#########################################
+
+
+# 데이터 준비
+data <- as.vector(run1)  # (5,5,60225) 데이터를 1차원 벡터로 변환
+total_days <- length(data)  # 전체 일수 (60225)
+years <- total_days / 365  # 연도 개수
+
+# 계절 정의 (봄: 3~5월, 여름: 6~8월, 가을: 9~11월, 겨울: 12~2월)
+season_names <- c("Spring", "Summer", "Autumn", "Winter")
+season_indices <- list(
+  Spring = rep(c(rep(TRUE, 59), rep(FALSE, 274)), years),
+  Summer = rep(c(rep(FALSE, 59), rep(TRUE, 92), rep(FALSE, 214)), years),
+  Autumn = rep(c(rep(FALSE, 151), rep(TRUE, 91), rep(FALSE, 123)), years),
+  Winter = rep(c(rep(FALSE, 242), rep(TRUE, 31), rep(FALSE, 59), rep(TRUE, 31)), years)
+)
+
+# 계절별 강수량 데이터 추출
+season_data <- data.frame(Precipitation = numeric(0), Season = character(0))
+
+for (season in season_names) {
+  season_values <- data[season_indices[[season]]]  # 해당 계절의 강수량 데이터 추출
+  temp_df <- data.frame(Precipitation = season_values, Season = season)
+  season_data <- rbind(season_data, temp_df)  # 데이터 병합
+}
+
+# 계절별 분산 계산
+season_variance <- season_data %>%
+  group_by(Season) %>%
+  summarise(Variance = var(Precipitation, na.rm = TRUE))
+
+# 결과 출력
+print(season_variance)
+
+# 박스플롯으로 계절별 강수량 분산 비교
+ggplot(season_data, aes(x = Season, y = Precipitation, fill = Season)) +
+  geom_boxplot() +
+  labs(title = "계절별 강수량 분포", x = "계절", y = "강수량") +
+  theme_minimal()
+
+# Bartlett's Test (정규성 가정)
+bartlett_test <- bartlett.test(Precipitation ~ Season, data = season_data)
+print(bartlett_test)
+
+
+#######################################################################
+
+
+
+
+
+
+
+
+# 365일 주기 기반 푸리에 회귀 모델 생성
+fourier_terms <- function(t, K = 3, period = 365) {
+  terms <- data.frame(t = t)
+  for (k in 1:K) {
+    terms[[paste0("sin", k)]] <- sin(2 * pi * k * t / period)
+    terms[[paste0("cos", k)]] <- cos(2 * pi * k * t / period)
+  }
+  return(terms)
+}
+
+# 3차 푸리에 근사 (K = 3)
+K <- 2
+fourier_data <- fourier_terms(t, K)
+
+# 선형 회귀 모델 적합
+model <- lm(X_t ~ ., data = fourier_data)
+
+# 계절성 성분 S(t) 예측
+S_t <- predict(model, newdata = fourier_data)
+
+# 결과 확인
+print(length(S_t))  # 36500일의 계절성 성분
+
+
+
+
+
+
+####################################
+
+df <- df %>%
+  mutate(
+    season = case_when(
+      month(date) %in% c(3,4,5,6,7,8) ~ "Warm Season",  # 봄+여름
+      month(date) %in% c(9,10,11,12,1,2) ~ "Cold Season" # 가을+겨울
+    )
+  )
+
+
+anova_result <- aov(precip ~ season, data = df)
+summary(anova_result)
+
+kruskal_result <- kruskal.test(precip ~ season, data = df)
+kruskal_result
+
+
+
+###################################################
+
+
+# 데이터를 long format으로 변환
+df <- expand.grid(i = 1:5, j = 1:5, date = dates) %>%
+  mutate(
+    doy = yday(date),  # 연중일 (1~365)
+    precip = as.vector(run1)  # 강수량 데이터
+  )
+
+# 연중일(DOY)별 분위수 계산 (5x5 셀 전체에 대해 집계)
+quantile_df <- df %>%
+  group_by(doy) %>%
+  summarise(
+    q10 = quantile(precip, 0.10),
+    q50 = quantile(precip, 0.50),
+    mean = mean(precip),
+    q90 = quantile(precip, 0.90),
+    q99 = quantile(precip, 0.99)
+  ) %>%
+  pivot_longer(cols = c(q10, q50, mean, q90, q99), names_to = "quantile", values_to = "value")
+
+# 시각화
+ggplot(quantile_df, aes(x = doy, y = value, color = quantile)) +
+  geom_line(size = 1) +
+  scale_x_continuous(breaks = seq(0, 365, 30)) +  # X축을 월별로 보기 쉽게 조정
+  labs(
+    title = "Annual Precipitation Quantiles (5×5 Grid)",
+    x = "Day of Year (DOY)",
+    y = "Precipitation",
+    color = "Quantile"
+  ) +
+  theme_minimal()
+
+
+
+
+
+
+
+
+
 
