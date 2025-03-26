@@ -182,7 +182,9 @@ load("data//run4.RData")
 
 # 
 
-run1에서 365일 trend 
+run1에서 365일 trend , 이걸보고 계절성을 나눌수도 있을 것 같다. 
+90% percentile은 겨울, 봄이 높은데 , 75%은 오히려 낮다 
+
 ```{r}
 # 데이터 정보 설정
 days_per_year <- 365
@@ -245,7 +247,7 @@ ggplot(percentile_df, aes(x=Day)) +
 ```
 
 
-## d
+## Cell별 
 
 ```{r}
 
@@ -428,6 +430,13 @@ grid.arrange(plot1, plot2, plot3, plot4, ncol = 2)
 
 
 ```
+
+
+Cell별로 확실히 지역성은 차이 존재한다. 분포 차이도 존재하는것 같다 lower 10%이 제일 높은 Cell이 Upper 10% Cell 이 아니다. Percentile별 높낮 차이가 유지되지 않음 
+
+
+(추측) Run별로 지역성 Trend 동일한데, 지역간의 Trend의 선명함(?)에서 차이가 있는듯 
+
 
 ![설명](run1TresholdChangeParameter.png)
 

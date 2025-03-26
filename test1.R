@@ -18,6 +18,8 @@ library(sf)
 library(geosphere)
 library(evd)
 library(evir)   # gpd() 함수 제공
+library(fields)
+library(lmtest)
 
 load("data//run1.RData")
 load("data//run2.RData")
