@@ -34,11 +34,12 @@ qGPD<-function(tau,B,thresh){
   Y}
 
 
-workingDir = "C:/Users/ddsy9/Documents/GitHub/EVA2025/"
+
+workingDir = ""
 source(paste0(workingDir,"eva-reich2014-MCMC.R"))
-MCMCResult_winter_dataNC <- readRDS(paste0(workingDir,"MCMC_result/MCMCsamples_winter_dataNC.RDS"))
+MCMCResult_winter_dataNC <- readRDS(paste0(workingDir,"MCMC_result/MCMCsamples_winter_dataNC10000.RDS"))
 MCMCResult_winter_dataCO <- readRDS(paste0(workingDir,"MCMC_result/MCMCsamples_winter_dataCO.RDS"))
-MCMCResult_summer_dataNC <- readRDS(paste0(workingDir,"MCMC_result/MCMCsamples_summer_dataNC.RDS"))
+MCMCResult_summer_dataNC <- readRDS(paste0(workingDir,"MCMC_result/MCMCsamples_summer_dataNC10000.RDS"))
 MCMCResult_summer_dataCO <- readRDS(paste0(workingDir,"MCMC_result/MCMCsamples_summer_dataCO.RDS"))
 # MCMCResult_winter_dataOri <- readRDS(paste0(workingDir,"MCMC_result/MCMCsamples_winter_dataOriginal.RDS"))
 MCMCResult_summer_dataOri <- readRDS(paste0(workingDir,"MCMC_result/MCMCsamples_summer_dataOriginal.RDS"))
@@ -54,17 +55,18 @@ run2_NC <- readRDS(paste0(workingDir,"Validation/NC/run1111.006.rds"))
 run3_NC <- readRDS(paste0(workingDir,"Validation/NC/run1231.011.rds"))
 run4_NC <- readRDS(paste0(workingDir,"Validation/NC/run1231.020.rds"))
 
-load(paste0(workingDir,"data/run1.RData"))
-load(paste0(workingDir,"data/run2.RData"))
-load(paste0(workingDir,"data/run3.RData"))
-load(paste0(workingDir,"data/run4.RData"))
+# load(paste0(workingDir,"data/run1.RData"))
+# load(paste0(workingDir,"data/run2.RData"))
+# load(paste0(workingDir,"data/run3.RData"))
+# load(paste0(workingDir,"data/run4.RData"))
 
 
 
 month_vec <- month(as.Date(rep(c(1:365), time = 165)))
 wint_vec <- c(1:60225)[month_vec %in% c(1,2,3,4,11,12)] 
 summ_vec <- c(1:60225)[month_vec %in% c(5:10)]
-
+wint_length <- length(wint_vec)
+summ_length <- length(summ_vec)
 
 y_NC <- array(0, dim = c(60225, 5, 5, 4))
 for(t in 1:60225){
@@ -100,26 +102,31 @@ y_Ori_summ <- y_CO[summ_vec,,,]
 
 
 
-################## Data Change ###########################
-sourceData = y_Ori_summ 
-samplePriorDistn = MCMCResult_summer_dataOri 
-sourceData = sourceData[[1]]
-samplePriorDistn = samplePriorDistn[[1]]
-###########################################################
-
-
-####### Setting ################
-M = nrow(samplePriorDistn)
+# ################## Data Change ###########################
+# sourceData = y_NC_summ
+# samplePriorDistnSummer = MCMCResult_summer_dataNC
+# samplePriorDistnWinter = MCMCResult_winter_dataNC
+# 
+# sourceData = sourceData[[1]]
+# samplePriorDistn = samplePriorDistn[[1]]
+# samplePriorDistn = samplePriorDistn[[1]]
+# 
+# 
+# ###########################################################
+# 
+# 
+# ####### Setting ################
+# M = nrow(samplePriorDistn)
 # L = 25
 # nd = 25
-L = 5
-nd = 5
-
-
-####### Treshold
-# u = numeric(25)
-u_univarite <- quantile(sourceData, prob = .9)
-u = rep(u_univarite,25) %>% as.vector()
+# # L = 5
+# # nd = 5
+# 
+# 
+# ####### Treshold
+# # u = numeric(25)
+# u_univarite <- quantile(sourceData, prob = .9)
+# u = rep(u_univarite,25) %>% as.vector()
 
 ####### dw2
 if(nd == 5){ 
@@ -142,85 +149,142 @@ X2Y <- function(X, u, pi, sigma, xi){
 Y_SampleResult = NULL
 maxIter = 60225*100
 
-prelim_prob1 = numeric(1)
-prelim_prob2 = numeric(1)
-prelim_prob3 = numeric(1)
-prelim_prob3_buffer = 0
 
-final_prob1 = numeric(1)
-final_prob2 = numeric(1)
-final_prob3 = numeric(1)
-final_prob3_buffer = 0
+TotalIter = 1000
 
-######## Iter 
-for( iter in 1:maxIter){
-  #####################################  
-  ######## sampling prior Distn
-  # set.seed(Sys.time())
-  # rm(.Random.seed,envir=globalenv())
-  indx = sample(1:M,1)
-  samplePrior <- samplePriorDistn[indx,]
-  alpha = expit(samplePrior["Alpha"])
-  xi = samplePrior["Shape"]
-  gamma = exp(samplePrior["BW"])
-  pis = expit(samplePrior[1:25])
-  sigmas = exp(samplePrior[26:50])
+
+
+
+for( iterOuter in 1:TotalIter){
+  
 
   
-  ######## B를 만든다 
-  # Bstable <- rstable(L, alpha = alpha, beta = 1, pm = 1) #beta = 1 to set positive stable dist
-  Bstable <-   rps(L, alpha = alpha) #beta = 1 to set positive stable dist
+  
 
-  ######## A를 만든다
-  FAC<-fac2FAC(make.fac(dw2,gamma)) # gaussian kernels  K(j)s
-  A<-a2A(FAC,Bstable,alpha) 
-  
-  ######## X를 만든다 
-  X <- numeric(nd) 
-  for( j in 1:nd){
-    X[j] = rGEV(1,A[j]^alpha, alpha*A[j]^alpha, alpha)
-  }
-  
-  ######## Y를 만든다
-  Y <- numeric(nd)
-  for (j in 1:nd){
-    Y[j] = X2Y(X[j], u[j], pis[j], sigmas[j], xi)
-  }
-  
-  
-  #############################
-  # Prelim 
-  if(nd==5){
-    if(sum(Y)>85) {prelim_prob1 = prelim_prob1 + 1}
-    if(sort(Y,decreasing=T)[3]>4.3) {prelim_prob2 = prelim_prob2 + 1}
-    if(sort(Y,decreasing=T)[3]>2.5) {
-      if(prelim_prob3_buffer==1){
-      prelim_prob3 = prelim_prob3 + 1
-      }
-      prelim_prob3_buffer = 1 
-    }else{
-      prelim_prob3_buffer = 0
-    }
-  }
-  # Final 
-  if(nd==25){
-    if(sum(Y)>1.7) {final_prob1 = final_prob1 + 1}
-    if(sort(Y,decreasing=T)[6]>5.7) {final_prob2 = final_prob2 + 1}
-    if(sort(Y,decreasing=T)[3]>5) {
-      if(final_prob3_buffer==1){
-        final_prob3 = final_prob3 + 1
-      }
-      final_prob3_buffer = 1 
-    }else{
-      final_prob3_buffer = 0
-    }
-  }
-  
 }
 
-prelim_prob1/maxIter*100
-prelim_prob2/maxIter*100
-prelim_prob3/maxIter*100
+
+
+
+samplingFunc(sourceData = y_NC_summ , samplePriorDistn = MCMCResult_summer_dataNC,seasonLength =summ_length ,burnin = 2000)
+
+
+
+
+
+samplingFunc = function(sourceData,samplePriorDistn,burnin = 1000,seasonLength=1){
+  
+  
+  maxIter = seasonLength
+  NC_p1_1 = numeric(1)
+  NC_p1_2 = numeric(1)
+  NC_p2_1 = numeric(1)
+  NC_p2_2 = numeric(1)
+  NC_p3_1 = numeric(1)
+  NC_p3_2 = numeric(1)
+  NC_p3_1_buffer = 0
+  NC_p3_2_buffer = 0
+  
+  ################## Data Change ###########################
+  sourceData = sourceData
+  samplePriorDistn = samplePriorDistn[[1]]
+
+  samplePriorDistn = samplePriorDistn[burnin:nrow(samplePriorDistn),]
+  ###########################################################
+  
+  
+  ####### Setting ################
+  M = nrow(samplePriorDistn)
+  L = 25
+  nd = 25
+
+  ####### dw2
+  if(nd == 5){ 
+    dw2<-as.matrix(dist(1:nd,diag=T,upper=T))^2
+  }else if(nd == 25){
+    nd_sqrt <- sqrt(nd)
+    dw2<-as.matrix(dist(expand.grid(1:nd_sqrt, 1:nd_sqrt),diag=T,upper=T))^2
+  } 
+  
+  ## Y만드는 함수
+  X2Y <- function(X, u, pi, sigma, xi){
+    U = exp(-1/X)
+    if(U<= pi){result = u
+    }else{result = qgpd(p=(1-U)/(1-pi),sigma=sigma , xi=xi, u = u)
+    }
+    return(result)
+  }
+  
+  
+  ####### Treshold
+  # u = numeric(25)
+  u_univarite <- quantile(sourceData, prob = .9)
+  u = rep(u_univarite,25) %>% as.vector()
+  
+  
+  ######## Iter 
+  for( iter in 1:maxIter){
+    #####################################  
+    ######## sampling prior Distn
+    indx = sample(1:M,1)
+    samplePrior <- samplePriorDistn[indx,]
+    alpha = expit(samplePrior["Alpha"])
+    xi = samplePrior["Shape"]
+    gamma = exp(samplePrior["BW"])
+    pis = expit(samplePrior[1:25])
+    sigmas = exp(samplePrior[26:50])
+    
+    
+    ######## B를 만든다 
+    Bstable <-   rps(L, alpha = alpha) #beta = 1 to set positive stable dist
+    
+    ######## A를 만든다
+    FAC<-fac2FAC(make.fac(dw2,gamma)) # gaussian kernels  K(j)s
+    A<-a2A(FAC,Bstable,alpha) 
+    
+    ######## X를 만든다 
+    X <- numeric(nd) 
+    for( j in 1:nd){
+      X[j] = rGEV(1,A[j]^alpha, alpha*A[j]^alpha, alpha)
+    }
+    
+    ######## Y를 만든다
+    Y <- numeric(nd)
+    for (j in 1:nd){
+      Y[j] = X2Y(X[j], u[j], pis[j], sigmas[j], xi)
+    }
+    
+    
+    #############################
+    # NC 
+    #############################
+    if(min(Y)>5.5e-7){ NC_p1_1 = NC_p1_1 + 1}
+    if(min(Y)>5e-7) {  NC_p1_2 = NC_p1_2 + 1}
+    if(sort(Y,decreasing = T)[6]>1.7e-6) {  NC_p2_1 = NC_p2_1 + 1}
+    if(sort(Y,decreasing = T)[6]>1.6e-6) {  NC_p2_2 = NC_p2_2 + 1}
+    if(sort(Y,decreasing = T)[3]>1.6e-6) {
+      if(NC_p3_1_buffer ==1 ){
+        NC_p3_1 = NC_p3_1 + 1  
+      }
+      NC_p3_1_buffer = 1 
+    }else{
+      NC_p3_1_buffer = 0 
+    }
+    
+    if(sort(Y,decreasing = T)[3]>1.4e-6) {
+      if(NC_p3_2_buffer ==1 ){
+        NC_p3_2 = NC_p3_2 + 1  
+      }
+      NC_p3_2_buffer = 1 
+    }else{
+      NC_p3_2_buffer = 0 
+    }
+  }
+ result = c(NC_p1_1,NC_p1_2,NC_p2_1,NC_p2_2,NC_p3_1,NC_p3_2) 
+ return(result)
+}
+
+
 
 
 
